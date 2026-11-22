@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>СПМ Анализ</title><link rel="stylesheet" href="style.css"><script src="metrics.js" defer></script><script src="trainers.js" defer></script><script src="rating.js" defer></script><script src="storage.js" defer></script><script src="department-picker.js" defer></script><script src="ui.js" defer></script><script src="rating-ui.js" defer></script>
+</head>
+<body>
+<header class="app-header">
+<div class="brand-bar"><div class="brand-card wrap">
+<div class="brand-identity">
+<img class="brand-emblem" src="emblem.png" alt="Шильдик Москвич" width="630" height="630">
+<h1>СПМ Анализ</h1>
+</div>
+<img class="brand-wordmark" src="Logo.png" alt="МОСКВИЧ" width="1280" height="296">
+</div></div>
+<div class="section-bar">
+<nav class="section-nav wrap" aria-label="Разделы">
+<button id="deptTab" aria-pressed="true">Департамент</button>
+<button id="plantTab" aria-pressed="false">Завод</button>
+</nav>
+</div>
+</header>
+<main class="wrap">
+<section class="filters" aria-label="Панель управления">
+<div id="deptField">
+<label id="departmentLabel" for="department">Департамент</label>
+<div class="department-control">
+<span class="department-icon department-selected-icon" aria-hidden="true" hidden></span>
+<input id="department" type="text" value="Сборка" maxlength="150" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="departmentOptions">
+<button type="button" class="department-toggle" tabindex="-1" aria-label="Список департаментов" aria-expanded="false" aria-controls="departmentOptions"></button>
+<div id="departments" class="department-menu" hidden>
+<ul role="listbox" id="departmentOptions" aria-labelledby="departmentLabel"></ul>
+<p class="muted" role="status" hidden>Совпадений нет. Можно указать название из JSON.</p>
+</div>
+</div>
+</div>
+<label id="monthField">Месяц <input id="month" type="month" required></label>
+<button id="upload" class="primary">Загрузить JSON</button>
+<input type="file" id="batch" accept=".json,application/json" multiple hidden>
+<input type="file" id="replacement" accept=".json,application/json" hidden>
+<details class="backup">
+<summary aria-label="Хранение и резервные копии">Хранение и копии</summary>
+<div class="backup-content">
+<p id="storageStatus" role="status">Проверка хранилища Edge…</p>
+<div class="actions">
+<button id="exportBackup" disabled>Скачать резервную копию</button>
+<button id="loadBackup" disabled>Восстановить из файла</button>
+<input id="backupFile" type="file" accept=".json,application/json" hidden>
+</div>
+<p class="muted">Копия включает все месяцы, исходные матрицы и перечни завода.</p>
+</div>
+</details>
+</section>
+<div id="message" role="status"></div>
+<section id="departmentTotals" class="department-totals" aria-label="Общие показатели">
+<div class="totals-grid" role="status">
+<div class="total-card">
+<p class="total-label">Всего постов</p>
+<strong id="departmentPostCount">—</strong>
+</div>
+<div class="total-card" title="По действующим правилам аналитики: без ролей НУ, СО и ДС">
+<p class="total-label">Всего операторов</p>
+<strong id="departmentOperatorCount">—</strong>
+</div>
+<p id="departmentTotalsPeriod" class="totals-period muted"></p>
+</div>
+</section>
+<div class="analysis-tabs" role="tablist" aria-label="Вид поливалентности">
+<button id="operatorTab" type="button" role="tab" aria-controls="operatorPanel" aria-selected="true">Операторы</button>
+<button id="postTab" type="button" role="tab" aria-controls="postPanel" aria-selected="false" tabindex="-1">Посты</button>
+<button id="meanTab" type="button" role="tab" aria-controls="meanPanel" aria-selected="false" tabindex="-1">Среднее</button>
+<button id="trainerTab" type="button" role="tab" aria-controls="trainerPanel" aria-selected="false" tabindex="-1">Форматоры</button>
+<button id="ratingTab" type="button" role="tab" aria-controls="ratingPanel" aria-selected="false" tabindex="-1" hidden>Рейтинг участков</button>
+</div>
+<section id="operatorPanel" class="analysis-panel" role="tabpanel" aria-labelledby="operatorTab" tabindex="0">
+<h2>Поливалентность операторов</h2>
+<div id="cards" class="cards"></div>
+<div class="panel">
+<div class="history-heading"><h3>Динамика по месяцам</h3>
+</div>
+<div class="legend"><span>2L</span><span>3L</span></div>
+<div class="scroll chart-scroll" id="chart" role="region" aria-label="График динамики операторов" tabindex="0"></div>
+<h3 class="history-title">Месячная история</h3>
+<div class="scroll history-scroll" id="history" role="region" aria-label="Месячная история операторов" tabindex="0"></div>
+</div>
+</section>
+<section id="postPanel" class="analysis-panel" role="tabpanel" aria-labelledby="postTab" tabindex="0" hidden>
+<h2>Поливалентность постов</h2>
+<div id="postCards" class="cards"></div>
+<div class="panel">
+<div class="history-heading"><h3>Динамика по месяцам</h3></div>
+<div class="legend"><span>2L</span><span>3L</span></div>
+<div class="post-charts">
+<div><h4>Количество постов</h4><div class="scroll chart-scroll" id="postCountChart" role="region" aria-label="График количества постов" tabindex="0"></div></div>
+<div><h4>Доля постов</h4><div class="scroll chart-scroll" id="postRateChart" role="region" aria-label="График доли постов" tabindex="0"></div></div>
+</div>
+<h3 class="history-title">Месячная история</h3>
+<div class="scroll history-scroll" id="postHistory" role="region" aria-label="Месячная история постов" tabindex="0"></div>
+<p id="postHistoryStatus" class="muted"></p>
+</div>
+</section>
+<section id="meanPanel" class="analysis-panel" role="tabpanel" aria-labelledby="meanTab" tabindex="0" hidden>
+<h2>Итоговая поливалентность ILU</h2>
+<div id="meanCards" class="cards"></div>
+<div class="panel">
+<div class="history-heading"><h3>Динамика по месяцам</h3></div>
+<div class="legend"><span>2L</span><span>3L</span></div>
+<div class="scroll chart-scroll" id="meanChart" role="region" aria-label="График итоговой поливалентности ILU" tabindex="0"></div>
+<h3 class="history-title">Месячная история</h3>
+<div class="scroll history-scroll" id="meanHistory" role="region" aria-label="Месячная история итогов ILU" tabindex="0"></div>
+</div>
+</section>
+<section id="trainerPanel" class="analysis-panel" role="tabpanel" aria-labelledby="trainerTab" tabindex="0" hidden>
+<h2>Покрытие постов форматорами</h2>
+<p class="muted">Пост покрыт, если на нём есть хотя бы один сотрудник с уровнем U. Роли сотрудников не влияют на расчёт.</p>
+<div id="trainerCards" class="cards"></div>
+<div class="panel">
+<div class="history-heading"><h3>Динамика покрытия по месяцам</h3></div>
+<div class="scroll chart-scroll" id="trainerChart" role="region" aria-label="График покрытия форматорами" tabindex="0"></div>
+<h3 class="history-title">Месячная история</h3>
+<div class="scroll history-scroll" id="trainerHistory" role="region" aria-label="История покрытия форматорами" tabindex="0"></div>
+<p id="trainerHistoryStatus" class="muted"></p>
+</div>
+<details class="panel"><summary>Посты без U</summary><div id="trainerUncovered" class="scroll history-scroll"></div></details>
+</section>
+<section id="ratingPanel" class="analysis-panel" role="tabpanel" aria-labelledby="ratingTab" tabindex="0" hidden>
+<div id="ratingMetrics" class="rating-metrics" role="tablist" aria-label="Показатели рейтинга"></div>
+<div class="rating-heading"><h2 id="ratingTitle">Рейтинг участков</h2></div>
+<p id="ratingStatus" class="coverage" role="status"></p>
+<div id="ratingPeriods" class="rating-periods"></div>
+<div id="ratingBoards" role="tabpanel" tabindex="0"></div>
+<dialog id="ratingDetail" aria-labelledby="ratingDetailTitle">
+<form method="dialog"><button class="rating-close">Закрыть</button></form>
+<h2 id="ratingDetailTitle"></h2><div id="ratingDetailContent"></div>
+</dialog>
+</section>
+<div id="coverage" class="coverage" role="status"></div>
+<section id="matrixRowsPanel" class="panel"><h2 id="rowsTitle">Загруженные матрицы</h2><div class="scroll" id="rows"></div></section>
+<details id="plan" class="panel" hidden><summary>Ожидаемые матрицы завода за месяц</summary>
+<p>Укажите полный перечень для завода. Разделите четыре поля точкой с запятой: департамент; цех; участок; смена.</p>
+<label>Перечень матриц<textarea id="roster" rows="7" placeholder="Сборка; Цех сборки салона; Участок сборки салона 4; A"></textarea></label>
+<div class="actions"><button id="appendLoaded">Добавить загруженные</button><button id="copyRoster">Взять последний заданный перечень</button><button id="saveRoster" class="primary">Сохранить перечень</button></div>
+<div id="missing"></div></details>
+</main></body></html>
