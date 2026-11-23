@@ -72,7 +72,7 @@ globalThis.spmStorage = (() => {
     }
   }
 
-  function importFiles({ files, month, department, replaceId }) {
+  function importFiles({ files, month, department, replaceId, expectedVersion }) {
     if (!files.length || files.length > 100 || (replaceId && files.length !== 1)) {
       throw new Error('Выберите от 1 до 100 файлов. Для замены выберите один файл.');
     }
@@ -85,6 +85,9 @@ globalThis.spmStorage = (() => {
           if (replaceId && (replaceId !== record.id || !existing)) {
             throw new Error('Участок, цех, смена или месяц не совпадают с заменяемой матрицей.');
           }
+          if (replaceId && expectedVersion && (existing.raw !== expectedVersion.raw || existing.importedAt !== expectedVersion.importedAt)) {
+            return { name, status: 'Локальная матрица изменилась после предпросмотра. Обновите проверку.' };
+          }
           if (existing?.raw === raw) return { name, status: 'Дубликат пропущен' };
           if (existing && !replaceId) return { name, status: 'Матрица уже есть. Используйте «Заменить» в её строке.' };
           state.matrices[record.id] = { ...record, name, raw, importedAt: new Date().toISOString() };
@@ -92,6 +95,22 @@ globalThis.spmStorage = (() => {
         } catch (error) { return { name, status: error.message }; }
       });
       return { ...overview(state), results };
+    });
+  }
+
+  function deleteMatrix(id, expected) {
+    return transact(state => {
+      const existing = Object.hasOwn(state.matrices, id) ? state.matrices[id] : null;
+      let status = 'missing';
+      if (existing) {
+        status = 'changed';
+        if (expected && existing.raw === expected.raw && existing.name === expected.name
+          && existing.importedAt === expected.importedAt) {
+          delete state.matrices[id];
+          status = 'deleted';
+        }
+      }
+      return { data: overview(state), status };
     });
   }
 
@@ -154,10 +173,12 @@ globalThis.spmStorage = (() => {
     });
   }
 
+  async function snapshot() { return overview(await read()); }
+
   async function ratingMatrices(month) {
     const state = await read();
     return Object.values(state.matrices).filter(record => record.month === month);
   }
 
-  return { ratingMatrices, start, importFiles, saveRoster, exportBackup, validateBackup, restore };
+  return { ratingMatrices, snapshot, start, importFiles, deleteMatrix, saveRoster, exportBackup, validateBackup, restore };
 })();

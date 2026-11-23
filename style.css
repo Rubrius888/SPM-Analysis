@@ -230,3 +230,25 @@
   .rating-board--departments .rating-chart{scrollbar-gutter:auto}
   .rating-board--departments .rating-label{grid-template-columns:1.1rem minmax(0,1fr);gap:4px}
 }
+#cloudOpen{min-height:var(--toolbar-height)}
+#cloudDialog{width:min(920px,calc(100% - 24px));max-height:88vh;padding:18px;border:1px solid var(--line);border-radius:var(--radius);color:var(--ink)}
+#cloudDialog::backdrop{background:#10243d99}
+#cloudDialog details{margin:8px 0}
+#cloudCodeForm,#cloudImport{margin-top:12px}
+#cloudPreview td p{margin:0 0 6px}
+.matrix-row-actions{display:flex;gap:6px;flex-wrap:wrap;min-width:6rem}
+.matrix-row-actions button{padding:5px 8px;white-space:nowrap}
+.danger-button{color:#a32632;border-color:#e5c3c7;background:#fff}
+.danger-button:hover{background:#fff0f1}
+#deleteMatrixDialog{width:min(520px,calc(100% - 24px));max-height:88vh;padding:18px;border:1px solid var(--line);border-radius:var(--radius);color:var(--ink)}
+#deleteMatrixDialog::backdrop{background:#10243d99}
+.delete-matrix-details{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0}
+.delete-matrix-details dt{color:var(--muted)}
+.delete-matrix-details dd{margin:0;overflow-wrap:anywhere}
+#deleteMatrixError{color:#a32632}
+.danger-confirm{color:#fff;background:#a32632;border-color:#a32632}
+.danger-confirm:hover{background:#871f29}
+#cloudConnection:empty{display:none}
+#cloudConnection{align-self:center;font-size:12px;overflow-wrap:anywhere}
+
+#cloudOpen[hidden] + #cloudConnection{display:none}

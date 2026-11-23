@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>СПМ Анализ</title><link rel="stylesheet" href="style.css"><script src="metrics.js" defer></script><script src="trainers.js" defer></script><script src="rating.js" defer></script><script src="storage.js" defer></script><script src="department-picker.js" defer></script><script src="ui.js" defer></script><script src="rating-ui.js" defer></script>
+<title>СПМ Анализ</title><link rel="stylesheet" href="style.css"><script src="metrics.js" defer></script><script src="trainers.js" defer></script><script src="rating.js" defer></script><script src="storage.js" defer></script><script src="department-picker.js" defer></script><script src="ui.js" defer></script><script src="rating-ui.js" defer></script><script src="cloud-archive.js" defer></script><script src="cloud-archive-ui.js" defer></script>
 </head>
 <body>
 <header class="app-header">
@@ -36,6 +36,8 @@
 </div>
 <label id="monthField">Месяц <input id="month" type="month" required></label>
 <button id="upload" class="primary">Загрузить JSON</button>
+<button id="cloudOpen" type="button" hidden>Загрузить из архива</button>
+<span id="cloudConnection" class="muted" role="status"></span>
 <input type="file" id="batch" accept=".json,application/json" multiple hidden>
 <input type="file" id="replacement" accept=".json,application/json" hidden>
 <details class="backup">
@@ -141,4 +143,32 @@
 <label>Перечень матриц<textarea id="roster" rows="7" placeholder="Сборка; Цех сборки салона; Участок сборки салона 4; A"></textarea></label>
 <div class="actions"><button id="appendLoaded">Добавить загруженные</button><button id="copyRoster">Взять последний заданный перечень</button><button id="saveRoster" class="primary">Сохранить перечень</button></div>
 <div id="missing"></div></details>
+<dialog id="deleteMatrixDialog" aria-labelledby="deleteMatrixTitle" aria-describedby="deleteMatrixWarning">
+<h2 id="deleteMatrixTitle">Удалить матрицу</h2>
+<dl id="deleteMatrixDetails" class="delete-matrix-details"></dl>
+<p id="deleteMatrixWarning">Вы действительно хотите удалить эту матрицу из SPM Analysis? Действие нельзя отменить. Исходный файл в облачном архиве ILU останется без изменений.</p>
+<p id="deleteMatrixError" role="status" hidden></p>
+<div class="actions">
+<button id="cancelMatrixDelete" type="button" autofocus>Отмена</button>
+<button id="confirmMatrixDelete" class="danger-confirm" type="button">Удалить матрицу</button>
+</div>
+</dialog>
+<dialog id="cloudDialog" aria-labelledby="cloudTitle">
+<h2 id="cloudTitle">Рабочий архив ILU · Сборка</h2>
+<p id="cloudScope"></p><p class="muted">Отбор по месяцу экспорта в Europe/Moscow. Месяц производственной деятельности может отличаться.</p>
+<p id="cloudAccount" class="muted"></p>
+<div class="actions">
+<button id="cloudConnect" type="button">Подключить Яндекс</button>
+<button id="cloudDisconnect" type="button" hidden>Отключить аккаунт</button>
+<button id="cloudScan" type="button" hidden>Проверить архив</button>
+<button id="cloudClose" type="button">Закрыть</button>
+</div>
+<form id="cloudCodeForm" class="actions" hidden>
+<label>Одноразовый код Яндекса <input id="cloudCode" autocomplete="off" required></label>
+<button class="primary">Подтвердить код</button>
+</form>
+<p id="cloudStatus" role="status"></p>
+<div id="cloudPreview"></div>
+<button id="cloudImport" class="primary" type="button" hidden>Импортировать новые матрицы</button>
+</dialog>
 </main></body></html>

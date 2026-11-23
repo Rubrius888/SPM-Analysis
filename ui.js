@@ -53,6 +53,8 @@ analysisTabs.forEach((tab, index) => {
   };
 });
 let replacementTarget;
+const deleteDialog = byId('deleteMatrixDialog');
+let deleteSelection;
 let busy = false;
 
 function element(tag, text, className) {
@@ -238,6 +240,7 @@ function render() {
   byId('plan').hidden = !plant || ratingVisible;
   byId('monthField').hidden = ratingVisible;
   byId('upload').hidden = plant || ratingVisible;
+  byId('cloudOpen').hidden = plant || ratingVisible;
   for (const id of ['coverage', 'matrixRowsPanel']) byId(id).hidden = ratingVisible;
 
   departmentPicker.update([...data.matrices.map(row => row.department),
@@ -295,8 +298,14 @@ function render() {
       const button = element('button', 'Заменить');
       button.disabled = busy;
       button.addEventListener('click', () => { replacementTarget = row; byId('replacement').click(); });
+      const remove = element('button', 'Удалить', 'danger-button');
+      remove.disabled = busy;
+      remove.dataset.matrixId = row.id;
+      remove.addEventListener('click', () => openDeleteMatrix(row));
+      const actions = element('div', undefined, 'matrix-row-actions');
+      actions.append(button, remove);
       const summary = trainersVisible ? spmTrainers.aggregate([row]) : row.metrics;
-      return [row.workshop, row.section, row.shift, row.name, ...values(summary), button];
+      return [row.workshop, row.section, row.shift, row.name, ...values(summary), actions];
     }));
   }
   const missing = byId('missing');
@@ -311,6 +320,83 @@ function render() {
     }
   }
 }
+
+const deleteMessages = {
+  deleted: 'Матрица удалена из SPM Analysis.',
+  missing: 'Матрица уже удалена.',
+  changed: 'Матрица изменилась. Проверьте новую версию и повторите удаление.'
+};
+
+async function openDeleteMatrix(row) {
+  if (busy || deleteDialog.open) return;
+  const fields = [
+    ['Департамент', row.department], ['Цех', row.workshop], ['Участок', row.section],
+    ['Смена', row.shift], ['Месяц', row.month], ['Исходный JSON', row.name]
+  ];
+  byId('deleteMatrixDetails').replaceChildren(...fields.flatMap(([label, value]) =>
+    [element('dt', label), element('dd', value)]));
+  byId('deleteMatrixError').hidden = true;
+  const selection = { row };
+  deleteSelection = selection;
+  const confirm = byId('confirmMatrixDelete');
+  confirm.disabled = true;
+  deleteDialog.showModal();
+  try {
+    const records = await spmStorage.ratingMatrices(row.month);
+    if (deleteSelection !== selection || !deleteDialog.open) return;
+    const current = records.find(record => record.id === row.id);
+    if (!current || current.name !== row.name || current.importedAt !== row.importedAt) {
+      const snapshot = await spmStorage.snapshot();
+      if (deleteSelection !== selection || !deleteDialog.open) return;
+      data = snapshot;
+      render();
+      deleteDialog.close();
+      message(deleteMessages[current ? 'changed' : 'missing']);
+      return;
+    }
+    selection.version = current;
+    confirm.disabled = false;
+  } catch (error) {
+    if (deleteSelection === selection && deleteDialog.open) showDeleteError(error);
+  }
+}
+
+function showDeleteError(error) {
+  const notice = byId('deleteMatrixError');
+  notice.textContent = 'Не удалось удалить матрицу. ' + error.message;
+  notice.hidden = false;
+}
+
+byId('confirmMatrixDelete').onclick = async () => {
+  if (busy || !deleteSelection?.version) return;
+  const { row, version } = deleteSelection;
+  const confirm = byId('confirmMatrixDelete');
+  const cancel = byId('cancelMatrixDelete');
+  confirm.disabled = true;
+  cancel.disabled = true;
+  byId('deleteMatrixError').hidden = true;
+  setBusy(true);
+  try {
+    const result = await spmStorage.deleteMatrix(row.id, version);
+    data = result.data;
+    deleteDialog.close();
+    message(deleteMessages[result.status]);
+  } catch (error) {
+    showDeleteError(error);
+    confirm.disabled = false;
+  } finally {
+    cancel.disabled = false;
+    setBusy(false);
+  }
+};
+byId('cancelMatrixDelete').onclick = () => deleteDialog.close();
+deleteDialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
+deleteDialog.addEventListener('close', () => {
+  const id = deleteSelection?.row.id;
+  deleteSelection = undefined;
+  const action = [...byId('rows').querySelectorAll('[data-matrix-id]')].find(button => button.dataset.matrixId === id);
+  (action ?? byId('upload')).focus({ preventScroll: true });
+});
 
 function loadRoster() {
   byId('roster').value = (data.rosters[month.value] || []).map(row => parts(row).join('; ')).join('\n');
@@ -372,7 +458,7 @@ byId('saveRoster').onclick = async () => {
 };
 function setBusy(value) {
   busy = value;
-  for (const id of ['upload', 'exportBackup', 'loadBackup', 'saveRoster']) byId(id).disabled = value;
+  for (const id of ['upload', 'cloudOpen', 'exportBackup', 'loadBackup', 'saveRoster']) byId(id).disabled = value;
   render();
 }
 
