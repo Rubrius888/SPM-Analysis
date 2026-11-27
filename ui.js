@@ -13,7 +13,8 @@ const now = new Date();
 month.value = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
 let data = { matrices: [], rosters: {} };
 let plant = false;
-const analysisTabs = [byId('operatorTab'), byId('postTab'), byId('meanTab'), byId('trainerTab'), byId('ratingTab')];
+let scoreSection = false;
+const analysisTabs = [byId('operatorTab'), byId('postTab'), byId('meanTab'), byId('trainerTab'), byId('rotationTab'), byId('matrixWorkTab'), byId('ratingTab')];
 const analysisMetrics = [
   [['Операторы 2L', 'ops2'], ['Доля 2L', 'opPercent2', '%'], ['Операторы 3L', 'ops3'], ['Доля 3L', 'opPercent3', '%']],
   [['Посты 2L', 'posts2'], ['Доля 2L', 'postPercent2', '%'], ['Посты 3L', 'posts3'], ['Доля 3L', 'postPercent3', '%']],
@@ -232,16 +233,29 @@ function renderTrainers(selected, history) {
 }
 
 function render() {
-  updateAnalysisTabs();
-  byId('deptTab').setAttribute('aria-pressed', !plant);
-  byId('plantTab').setAttribute('aria-pressed', plant);
-  for (const id of ['deptField', 'upload']) byId(id).hidden = plant;
+  byId('deptTab').setAttribute('aria-pressed', !scoreSection && !plant);
+  byId('plantTab').setAttribute('aria-pressed', !scoreSection && plant);
+  byId('spmScoreTab').setAttribute('aria-pressed', scoreSection);
+  byId('spmScoreView').hidden = !scoreSection;
+  byId('spmScoreToolbar').hidden = !scoreSection;
+  byId('workspaceToolbar').classList.toggle('filters--score', scoreSection);
+  byId('analyticsView').hidden = scoreSection;
   const ratingVisible = activeAnalysis[plant ? 'plant' : 'department'] === analysisTabs.indexOf(byId('ratingTab'));
+  byId('deptField').hidden = scoreSection || plant;
+  byId('monthField').hidden = scoreSection || ratingVisible;
+  byId('upload').hidden = scoreSection || plant || ratingVisible;
+  byId('cloudOpen').hidden = scoreSection || plant || ratingVisible;
+  byId('cloudConnection').hidden = scoreSection;
+  if (scoreSection) {
+    spmScoreUI.render(data);
+    return;
+  }
+
+  updateAnalysisTabs();
   byId('plan').hidden = !plant || ratingVisible;
-  byId('monthField').hidden = ratingVisible;
-  byId('upload').hidden = plant || ratingVisible;
-  byId('cloudOpen').hidden = plant || ratingVisible;
-  for (const id of ['coverage', 'matrixRowsPanel']) byId(id).hidden = ratingVisible;
+  const rotationVisible = activeAnalysis[plant ? 'plant' : 'department'] === analysisTabs.indexOf(byId('rotationTab'));
+  const matrixWorkVisible = activeAnalysis[plant ? 'plant' : 'department'] === analysisTabs.indexOf(byId('matrixWorkTab'));
+  for (const id of ['coverage', 'matrixRowsPanel']) byId(id).hidden = ratingVisible || rotationVisible || matrixWorkVisible;
 
   departmentPicker.update([...data.matrices.map(row => row.department),
     ...Object.values(data.rosters).flat().map(row => row.department)]);
@@ -254,6 +268,14 @@ function render() {
   byId('departmentTotalsPeriod').textContent = period + (selected.length ? 'По загруженным матрицам' : 'Нет загруженных матриц');
   if (ratingVisible) {
     spmRatingUI.render(plant ? null : department.value, data);
+    return;
+  }
+  if (matrixWorkVisible) {
+    spmMatrixWorkUI.render(scoped, data.rosters, data.workJournal ?? {}, month.value, plant, scope);
+    return;
+  }
+  if (rotationVisible) {
+    spmRotationUI.render(scoped, data.rosters, month.value, plant, scope);
     return;
   }
   const completeness = coverage(month.value, selected);
@@ -414,17 +436,23 @@ async function upload(input, target) {
   setBusy(true);
   message('Загрузка матриц…');
   try {
-    const files = await Promise.all(selected.map(async file => ({ name: file.name, raw: await file.text() })));
-    data = await spmStorage.importFiles({ files, month: period, department: dept, replaceId: target?.id });
+    data = await spmStorage.importFiles({ files: selected, month: period, department: dept, replaceId: target?.id, progress: message });
     const list = element('ul');
-    list.append(...data.results.map(result => element('li', result.name + ' · ' + result.status)));
+    list.append(...data.results.map(result => element('li', result.name + ' · ' + spmMatrixFiles.showSize(result.size) + ' · ' + result.status)));
     byId('message').replaceChildren(list);
   } catch (error) { message(error.message); }
   finally { setBusy(false); }
 }
 
-byId('deptTab').onclick = () => { plant = false; message(''); render(); };
-byId('plantTab').onclick = () => { plant = true; message(''); render(); };
+function openSection(section) {
+  scoreSection = section === 'score';
+  if (!scoreSection) plant = section === 'plant';
+  message('');
+  render();
+}
+byId('deptTab').onclick = () => openSection('department');
+byId('plantTab').onclick = () => openSection('plant');
+byId('spmScoreTab').onclick = () => openSection('score');
 department.addEventListener('input', render);
 month.onchange = () => { loadRoster(); message(''); render(); };
 byId('upload').onclick = () => byId('batch').click();

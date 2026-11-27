@@ -1,10 +1,9 @@
 'use strict';
 
 globalThis.spmStorage = (() => {
-  const { aggregate, parseMatrix, fields, clean, validMonth, recordKey } = spmMetrics;
-  const empty = () => ({ matrices: {}, rosters: {} });
+  const { aggregate, parseMatrix, parseMatrixJSON, parseMatrixDocument, fields, clean, validMonth, recordKey } = spmMetrics;
+  const empty = () => ({ matrices: {}, rosters: {}, workJournal: {}, ratingSnapshots: {} });
   const format = 'spm-analysis-backup';
-  const maxFile = 10 * 1024 * 1024;
   let database;
   let session = empty();
 
@@ -56,9 +55,9 @@ globalThis.spmStorage = (() => {
 
   const overview = state => ({
     matrices: Object.values(state.matrices).map(({ raw, ...record }) => ({
-      ...record, metrics: aggregate([record]), trainerPosts: spmTrainers.fromMatrix(raw)
+      ...record, metrics: aggregate([record]), work: spmMatrixWork.inspect(raw, record.month), trainerPosts: spmTrainers.fromMatrix(raw), rotation: spmRotation.fromMatrix(raw, record.month)
     })),
-    rosters: state.rosters
+    rosters: state.rosters, workJournal: state.workJournal ?? {}
   });
 
   async function start() {
@@ -72,30 +71,83 @@ globalThis.spmStorage = (() => {
     }
   }
 
-  function importFiles({ files, month, department, replaceId, expectedVersion }) {
+  async function importFiles({ files, month, department, replaceId, expectedVersion, source = 'manual', progress = () => {} }) {
     if (!files.length || files.length > 100 || (replaceId && files.length !== 1)) {
       throw new Error('Выберите от 1 до 100 файлов. Для замены выберите один файл.');
     }
-    return transact(state => {
-      const results = files.map(({ name, raw }) => {
-        try {
-          if (typeof raw !== 'string' || new Blob([raw]).size > maxFile) throw new Error('Размер одного JSON ограничен 10 МБ.');
-          const record = parseMatrix(raw, month, department);
+    const fileIO = spmMatrixFiles;
+    const results = [];
+    const prepared = [];
+    const batchLimit = 24 * 1024 * 1024;
+    let preparedSize = 0;
+
+    async function flush() {
+      if (!prepared.length) return;
+      const entries = prepared.splice(0);
+      preparedSize = 0;
+      progress('Сохранение матриц · ' + entries.length);
+      try {
+        const saved = await transact(state => entries.map(({ record, observation, raw, name, size }) => {
           const existing = state.matrices[record.id];
+          let status;
           if (replaceId && (replaceId !== record.id || !existing)) {
-            throw new Error('Участок, цех, смена или месяц не совпадают с заменяемой матрицей.');
+            status = 'Участок, цех, смена или месяц не совпадают с заменяемой матрицей.';
+          } else if (replaceId && expectedVersion && (existing.raw !== expectedVersion.raw || existing.importedAt !== expectedVersion.importedAt)) {
+            status = 'Локальная матрица изменилась после предпросмотра. Обновите проверку.';
+          } else if (existing?.raw === raw) {
+            status = 'Дубликат пропущен';
+          } else if (existing && !replaceId) {
+            status = 'Матрица уже есть. Используйте «Заменить» в её строке.';
+          } else {
+            state.matrices[record.id] = { ...record, name, raw, importedAt: new Date().toISOString() };
+            spmMatrixWork.append(state.workJournal ??= {}, state.matrices[record.id], observation, source === 'cloud' ? 'cloud' : 'manual');
+            status = existing ? 'Заменён' : 'Загружен';
           }
-          if (replaceId && expectedVersion && (existing.raw !== expectedVersion.raw || existing.importedAt !== expectedVersion.importedAt)) {
-            return { name, status: 'Локальная матрица изменилась после предпросмотра. Обновите проверку.' };
-          }
-          if (existing?.raw === raw) return { name, status: 'Дубликат пропущен' };
-          if (existing && !replaceId) return { name, status: 'Матрица уже есть. Используйте «Заменить» в её строке.' };
-          state.matrices[record.id] = { ...record, name, raw, importedAt: new Date().toISOString() };
-          return { name, status: existing ? 'Заменён' : 'Загружен' };
-        } catch (error) { return { name, status: error.message }; }
-      });
-      return { ...overview(state), results };
-    });
+          return { name, size, status };
+        }));
+        results.push(...saved);
+      } catch (error) {
+        results.push(...entries.map(({ name, size }) => ({ name, size, status: 'Не удалось сохранить: ' + error.message })));
+      }
+    }
+
+    for (const [index, file] of files.entries()) {
+      const { name } = file;
+      const label = (index + 1) + ' из ' + files.length + ' · ' + name;
+      let { size } = file;
+      try {
+        fileIO.checkSize(size);
+        if (prepared.length && (size === undefined || preparedSize + size > batchLimit)) await flush();
+        progress('Чтение JSON ' + label);
+        let raw = file.raw;
+        if (typeof raw === 'string') {
+          size = new Blob([raw]).size;
+          fileIO.checkSize(size);
+        } else if (typeof file.stream === 'function') {
+          ({ raw, size } = await fileIO.read(file.stream(), {
+            size, progress: bytes => progress('Чтение JSON ' + label + ' · ' + fileIO.showSize(bytes))
+          }));
+        } else {
+          throw new Error('Файл JSON недоступен для чтения.');
+        }
+        if (prepared.length && preparedSize + size > batchLimit) await flush();
+        progress('Проверка JSON ' + label + ' · ' + fileIO.showSize(size));
+        if (size >= 10 * 1024 * 1024) await fileIO.pause();
+        const document = parseMatrixJSON(raw);
+        const record = parseMatrixDocument(document, month, department);
+        const observation = await spmMatrixWork.observation(raw, month, document);
+        prepared.push({ record, observation, raw, name, size });
+        preparedSize += size;
+        if (preparedSize >= batchLimit) await flush();
+      } catch (error) {
+        // Keep the result order when a preceding small batch is still pending.
+        await flush();
+        results.push({ name, size: error.size ?? size, status: error instanceof RangeError
+          ? 'Недостаточно памяти для обработки JSON.' : error.message });
+      }
+    }
+    await flush();
+    return { ...await snapshot(), results };
   }
 
   function deleteMatrix(id, expected) {
@@ -162,6 +214,8 @@ globalThis.spmStorage = (() => {
       if (!Array.isArray(rows)) throw new Error('Резервная копия содержит некорректный перечень.');
       state.rosters[month] = normalizeRoster(month, rows.map(row => fields.map(field => row?.[field])));
     }
+    state.workJournal = spmMatrixWork.validate(source.workJournal);
+    state.ratingSnapshots = spmScore.validate(source.ratingSnapshots);
     return state;
   }
 
@@ -169,6 +223,8 @@ globalThis.spmStorage = (() => {
     return transact(current => {
       current.matrices = state.matrices;
       current.rosters = state.rosters;
+      spmMatrixWork.merge(current.workJournal ??= {}, state.workJournal);
+      spmScore.merge(current.ratingSnapshots ??= {}, state.ratingSnapshots);
       return overview(current);
     });
   }
@@ -180,5 +236,37 @@ globalThis.spmStorage = (() => {
     return Object.values(state.matrices).filter(record => record.month === month);
   }
 
-  return { ratingMatrices, snapshot, start, importFiles, deleteMatrix, saveRoster, exportBackup, validateBackup, restore };
+  const compileScore = (state, month) => spmScore.compile(month,
+    Object.values(state.matrices).filter(record => record.month === month), state.rosters[month] ?? []);
+
+  async function scorePeriod(requested) {
+    const state = await read();
+    const history = state.ratingSnapshots ?? {};
+    const month = validMonth(requested) ? requested : [...Object.keys(history), ...Object.keys(state.rosters),
+      ...Object.values(state.matrices).map(record => record.month)].sort().at(-1)
+      ?? spmMatrixWork.day(new Date().toISOString()).slice(0, 7);
+    const revisions = history[month] ?? [];
+    const previous = history[spmScore.previousMonth(month)]?.at(-1) ?? null;
+    return { month, revisions, previous, preview: revisions.length ? null : await compileScore(state, month) };
+  }
+
+  async function saveScore(month, expectedId, reason = '') {
+    if (!validMonth(month)) throw new Error('Выберите отчётный месяц.');
+    reason = reason.trim();
+    if ((expectedId !== null && !reason) || reason.length > 500) throw new Error('Укажите причину пересчёта до 500 символов.');
+    const report = await compileScore(await read(), month);
+    if (!report.rows.length) throw new Error('За выбранный месяц нет матриц и перечня ожидаемых смен.');
+    return transact(state => {
+      const history = (state.ratingSnapshots ??= {})[month] ??= [];
+      const parent = history.at(-1);
+      if ((parent?.id ?? null) !== expectedId) throw new Error('Снимок уже изменился в другой вкладке. Обновите отчёт.');
+      const formedAt = new Date(Math.max(Date.now(), parent ? Date.parse(parent.formedAt) + 1 : 0)).toISOString();
+      const snapshot = { ...report, id: crypto.randomUUID(), revision: (parent?.revision ?? 0) + 1,
+        formedAt, parentId: expectedId, reason: expectedId === null ? '' : reason };
+      history.push(snapshot);
+      return snapshot;
+    });
+  }
+
+  return { ratingMatrices, scorePeriod, saveScore, snapshot, start, importFiles, deleteMatrix, saveRoster, exportBackup, validateBackup, restore };
 })();

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="92" height="92" viewBox="0 0 92 92">
+  <defs>
+    <linearGradient id="ribbon" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#ab765b"/><stop offset="1" stop-color="#774833"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" x2="1" y1="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#ffdfbd"/><stop offset=".39" stop-color="#cb9675"/>
+      <stop offset=".64" stop-color="#ffdfbd"/><stop offset="1" stop-color="#a4613e"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0" x2=".8" y1="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#ffdfbd"/><stop offset="1" stop-color="#cb9675"/>
+    </linearGradient>
+  </defs>
+  <path d="M22 4h19l19 34-15 8z" fill="#774833"/>
+  <path d="M51 4h19L51 42l-16-8z" fill="url(#ribbon)"/>
+  <path d="M25 5h4l20 35m16-35h-4L45 38" fill="none" stroke="#ffdfbd" stroke-opacity=".48" stroke-width="2"/>
+  <rect x="39" y="28" width="14" height="12" rx="3" fill="#a4613e" stroke="#ffdfbd" stroke-width="1.5"/>
+  <circle cx="46" cy="60" r="27" fill="#683922" fill-opacity=".14" transform="translate(0 3)"/>
+  <circle cx="46" cy="60" r="27" fill="url(#rim)" stroke="#a4613e" stroke-width="1.2"/>
+  <circle cx="46" cy="60" r="22" fill="url(#face)" stroke="#a4613e" stroke-width="1.6"/>
+  <circle cx="46" cy="60" r="19.2" fill="none" stroke="#ffdfbd" stroke-width="1"/>
+  <path d="M26 59c4 1 7 4 8 9m32-9c-4 1-7 4-8 9" fill="none" stroke="#a4613e" stroke-width="1.4" stroke-linecap="round"/>
+  <path d="m46 42 1.4 3.2 3.4.3-2.6 2.2.8 3.3-3-1.7-3 1.7.8-3.3-2.6-2.2 3.4-.3z" fill="#a4613e"/>
+  <text x="46" y="73" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="25" font-weight="800" fill="#683922">3</text>
+</svg>

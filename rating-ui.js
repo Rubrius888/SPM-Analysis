@@ -129,24 +129,27 @@ globalThis.spmRatingUI = (() => {
     return { month, sections, text, expected };
   }
 
-  function bar(side, value) {
+  function bar(side, value, delta = null) {
     const month = monthName(report[side].month);
     const row = element('div', undefined, 'rating-bar rating-' + side);
     row.setAttribute('role', 'img');
-    row.setAttribute('aria-label', month + ': ' + (value === undefined ? 'нет данных' : value + '%'));
+    row.setAttribute('aria-label', month + ': ' + (value === undefined ? 'нет данных' : value + '%')
+      + (delta ? ' · ' + delta.getAttribute('aria-label') : ''));
     const label = element('span', value === undefined ? '—' : value + '%', 'rating-value');
     if (value !== undefined) {
       row.style.setProperty('--rating-value', value + '%');
       row.append(element('span', undefined, 'rating-fill'));
     }
-    row.append(label);
+    const tip = element('span', undefined, 'rating-bar-label');
+    tip.append(label);
+    if (delta) tip.append(delta);
+    row.append(tip);
     return row;
   }
 
   function draw() {
     const [key, label] = spmRating.indicators[activeMetric];
     const panel = element('figure', undefined, 'panel rating-board');
-    if (report.wholeDepartment) panel.classList.add('rating-board--departments');
     const caption = element('figcaption', label);
     const legend = element('div', undefined, 'rating-legend');
     for (const side of ['previous', 'current']) {
@@ -157,41 +160,111 @@ globalThis.spmRatingUI = (() => {
     chart.setAttribute('role', 'region');
     chart.setAttribute('aria-label', label + ' · сравнительная диаграмма');
     const sheet = element('div', undefined, 'rating-sheet');
-    const grid = element('div', undefined, 'rating-gridlines');
-    grid.setAttribute('aria-hidden', 'true');
-    const header = element('div', undefined, 'rating-header');
-    const axis = element('div', undefined, 'rating-axis');
-    for (const value of [0, 25, 50, 75, 100]) {
-      const tick = element('span', value + '%');
-      tick.style.left = value + '%';
-      axis.append(tick);
+    sheet.style.setProperty('--rating-groups', Math.max(1, report.rows.length));
+    const tooltip = element('div', undefined, 'rating-tooltip');
+    tooltip.id = 'ratingChartTooltip';
+    tooltip.setAttribute('role', 'tooltip');
+    tooltip.hidden = true;
+    let describedName;
+    function hideTooltip() {
+      tooltip.hidden = true;
+      describedName?.removeAttribute('aria-describedby');
+      describedName = undefined;
     }
-    header.append(element('span', report.wholeDepartment ? 'Департамент' : 'Участок'), axis, element('span', 'Изменение', 'rating-delta'));
-    const list = element('ol', undefined, 'rating-list');
-    spmRating.rank(report.rows, key).forEach((section, index) => {
+    chart.addEventListener('scroll', hideTooltip, { passive: true });
+    chart.addEventListener('keydown', event => { if (event.key === 'Escape') hideTooltip(); });
+    function bindTooltip(target, focus, items) {
+      const show = () => {
+        hideTooltip();
+        tooltip.replaceChildren(...items());
+        tooltip.hidden = false;
+        const bounds = panel.getBoundingClientRect();
+        const anchor = target.getBoundingClientRect();
+        const centered = anchor.left - bounds.left + (anchor.width - tooltip.offsetWidth) / 2;
+        tooltip.style.left = Math.max(8, Math.min(centered, panel.clientWidth - tooltip.offsetWidth - 8)) + 'px';
+        tooltip.style.top = chart.offsetTop + 'px';
+        focus.setAttribute('aria-describedby', tooltip.id);
+        describedName = focus;
+      };
+      target.addEventListener('pointerenter', show);
+      target.addEventListener('pointerleave', hideTooltip);
+      focus.addEventListener('focus', show);
+      focus.addEventListener('blur', hideTooltip);
+    }
+
+    const ranked = spmRating.rank(report.rows, key);
+    const unknownWorkshop = 'Цех не определён';
+    const workshopKey = section => report.wholeDepartment ? '' : spmMetrics.identityKey([section.workshop]);
+    const lists = new Map();
+    let column = 1;
+    for (const [workshop, sections] of Map.groupBy(ranked, workshopKey)) {
+      const list = element('ol', undefined, 'rating-list');
+      const position = column + ' / span ' + sections.length;
+      lists.set(workshop, list);
+      column += sections.length;
+      if (report.wholeDepartment) {
+        list.style.gridRow = '2';
+        list.style.gridColumn = position;
+        sheet.append(list);
+        continue;
+      }
+      const group = element('section', undefined, 'rating-workshop');
+      group.style.gridColumn = position;
+      const title = spmMetrics.clean(sections[0].workshop) || unknownWorkshop;
+      const heading = element('h3', undefined, 'rating-workshop-title');
+      heading.id = 'ratingWorkshop-' + lists.size;
+      heading.tabIndex = 0;
+      const headingLabel = element('span', undefined, 'rating-workshop-name');
+      headingLabel.append(element('span', title), element('small', 'Участков: ' + sections.length));
+      heading.append(headingLabel);
+      group.setAttribute('aria-labelledby', heading.id);
+      bindTooltip(headingLabel, heading, () => [
+        element('strong', title),
+        element('span', 'Участков в сравнении: ' + sections.length),
+        ...['previous', 'current'].map(side => {
+          const available = sections.filter(section => section[side]?.metrics[key] !== undefined).length;
+          return element('span', monthName(report[side].month) + ' · с показателем: ' + available + ' из ' + sections.length);
+        })
+      ]);
+      group.append(heading, list);
+      sheet.append(group);
+    }
+
+    ranked.forEach((section, index) => {
       const previous = section.previous?.metrics[key];
       const current = section.current?.metrics[key];
       const row = element('li', undefined, 'rating-entry');
+      if (index === 0 && current !== undefined) row.classList.add('rating-leader');
       const name = element('button', section.section, 'rating-section');
       name.onclick = () => openSection(section);
       const details = element('div', undefined, 'rating-label');
       const names = element('div');
       names.append(name);
-      if (!report.wholeDepartment) names.append(element('small', section.workshop, 'rating-meta'));
       details.append(element('span', current === undefined ? '—' : String(index + 1), 'rating-place'), names);
       const plot = element('div', undefined, 'rating-plot');
-      plot.append(bar('previous', previous), bar('current', current));
       const difference = current === undefined || previous === undefined ? null : current - previous;
-      const delta = element('strong', difference === null ? '—' : (difference > 0 ? '+' : '') + difference + ' п.п.', 'rating-delta');
+      const delta = element('strong', difference === null ? '—' : (difference < 0 ? '−' : difference > 0 ? '+' : '') + Math.abs(difference) + ' п.п.', 'rating-delta');
       if (difference > 0) delta.classList.add('rating-gain');
       if (difference < 0) delta.classList.add('rating-loss');
       delta.setAttribute('aria-label', difference === null ? 'Изменение недоступно' : 'Изменение: ' + delta.textContent);
-      row.append(details, plot, delta);
-      list.append(row);
+      plot.append(bar('previous', previous), bar('current', current, delta));
+      bindTooltip(row, name, () => {
+        const items = [element('strong', section.section)];
+        if (!report.wholeDepartment) items.push(element('span', spmMetrics.clean(section.workshop) || unknownWorkshop));
+        items.push(element('span', 'Место: ' + (current === undefined ? '—' : index + 1)));
+        for (const [side, value] of [['previous', previous], ['current', current]]) {
+          const snapshot = section[side];
+          items.push(element('span', monthName(report[side].month) + ' · ' + (value === undefined ? '—' : value + '%')));
+          if (snapshot) items.push(element('small', formatMetadata(snapshot)));
+        }
+        items.push(element('span', delta.getAttribute('aria-label')));
+        return items;
+      });
+      row.append(plot, details);
+      lists.get(workshopKey(section)).append(row);
     });
-    sheet.append(grid, header, list);
     chart.append(sheet);
-    panel.append(caption, legend, chart);
+    panel.append(caption, legend, chart, tooltip);
     boards.replaceChildren(panel);
   }
 

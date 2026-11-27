@@ -2,6 +2,7 @@
 
 (() => {
   const archive = spmCloudArchive;
+  const fileSize = spmMatrixFiles.showSize;
   const dialog = byId('cloudDialog');
   const preview = byId('cloudPreview');
   const status = byId('cloudStatus');
@@ -67,7 +68,7 @@
     signal?.throwIfAborted();
     preview.replaceChildren();
     const { candidates, expectedShifts, foundShifts, expectedSections, foundSections, missing, extra, unknown,
-      problems, conflicts, unread, damaged, duplicates, outside, files, listingRepeated } = result;
+      problems, checks, conflicts, unread, damaged, duplicates, outside, files, listingRepeated } = result;
     const incomplete = unread || damaged || conflicts.length || listingRepeated;
     const completeness = !expectedShifts ? 'Полнота не подтверждена · перечень не задан.'
       : missing.length || extra.length ? 'Неполная выборка.' : incomplete ? 'Полнота не подтверждена.' : 'Полная выборка.';
@@ -81,6 +82,7 @@
     warnings('Матрицы вне перечня', extra.map(label));
     warnings('Конфликтующие версии', conflicts);
     warnings('Ошибки файлов', problems);
+    warnings('Проверенные файлы', checks.map(item => item.name + ' · ' + fileSize(item.size) + ' · ' + item.status));
     if (problems.length && candidates.length) preview.append(element('p',
       'Для импорта доступны корректные версии. Среди отклонённых файлов может быть более свежая версия.'));
     const rows = [];
@@ -97,7 +99,7 @@
         replace.onclick = () => {
           if (!confirm('Заменить локальную матрицу «' + existing.name + '» облачной версией «' + item.name + '»?')) return;
           run(async () => {
-            data = await spmStorage.importFiles({ ...selection, files: [item], replaceId: item.id, expectedVersion: existing });
+            data = await spmStorage.importFiles({ ...selection, source: 'cloud', files: [item], replaceId: item.id, expectedVersion: existing, progress: text => { status.textContent = text; } });
             status.textContent = data.results[0].status;
             render();
             await showPreview();
@@ -105,22 +107,26 @@
         };
         state.append(replace);
       }
-      rows.push([label(item), item.name, date.format(item.exported), date.format(item.modified), state]);
+      rows.push([label(item), item.name, fileSize(item.size), 'JSON проверен', date.format(item.exported), date.format(item.modified), state]);
     }
     if (rows.length) {
       const grid = element('div', undefined, 'scroll');
-      table(grid, ['Матрица', 'Облачный JSON', 'Экспорт (МСК)', 'Изменён на Диске (МСК)', 'Локальная версия'], rows);
+      table(grid, ['Матрица', 'Облачный JSON', 'Размер', 'Проверка', 'Экспорт (МСК)', 'Изменён на Диске (МСК)', 'Локальная версия'], rows);
       preview.append(grid);
     }
     byId('cloudImport').hidden = !pending.length;
     byId('cloudImport').onclick = () => run(async () => {
       let imported = 0, skipped = 0;
+      const failures = [];
       try {
         for (let index = 0; index < pending.length; index += 100) {
-          data = await spmStorage.importFiles({ ...selection, files: pending.slice(index, index + 100) });
+          data = await spmStorage.importFiles({ ...selection, source: 'cloud', files: pending.slice(index, index + 100), progress: text => { status.textContent = text; } });
           for (const row of data.results) {
             if (row.status === 'Загружен') imported++;
-            else skipped++;
+            else {
+              skipped++;
+              failures.push(row.name + ' · ' + fileSize(row.size) + ' · ' + row.status);
+            }
           }
         }
         status.textContent = 'Импортировано: ' + imported + ' · пропущено: ' + skipped + '.';
@@ -129,6 +135,7 @@
       }
       render();
       await showPreview();
+      warnings('Пропущенные при импорте', failures);
     }, true);
   }
 
@@ -139,7 +146,9 @@
       result = await archive.scan({ ...selection, roster: data.rosters[selection.month] ?? [], signal,
         progress: text => { status.textContent = text; } });
       await showPreview(signal);
-      status.textContent = 'Предпросмотр готов. Проверьте список перед импортом.';
+      status.textContent = result.problems.length || result.conflicts.length || result.listingRepeated
+        ? 'Предпросмотр готов с исключениями. Проверьте ошибки и список перед импортом.'
+        : 'Предпросмотр готов. Проверьте список перед импортом.';
     });
   }
 

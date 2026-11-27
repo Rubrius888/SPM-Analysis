@@ -6,9 +6,9 @@ globalThis.spmCloudArchive = (() => {
   const api = 'https://cloud-api.yandex.net/v1/disk';
   const resources = api + '/virtual-disks/resources';
   const root = 'vd:Riy12Ntnw6jCXg:disk:/Архив ILU/Сборка';
-  const { clean, identityKey, recordKey, parseMatrix, validMonth } = spmMetrics;
+  const { clean, identityKey, recordKey, parseMatrixJSON, parseMatrixDocument, validMonth } = spmMetrics;
   const format = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit' });
-  const maxSize = 10 * 1024 * 1024;
+  const fileIO = spmMatrixFiles;
   const authKey = 'spm-cloud-archive-oauth-v1';
   const writeLock = authKey + ':write';
   const loginLock = authKey + ':login';
@@ -161,13 +161,13 @@ globalThis.spmCloudArchive = (() => {
     }
   }
 
-  async function request(url, signal, options = {}, authenticated = false) {
+  async function request(url, signal, options = {}, authenticated = false, timeout = 30000) {
     const current = authenticated ? session : null;
     if (authenticated && !connected()) {
       if (current) await discard(current);
       throw new Error('Требуется повторная авторизация.');
     }
-    const signals = [AbortSignal.timeout(30000), signal, current?.controller.signal].filter(Boolean);
+    const signals = [AbortSignal.timeout(timeout), signal, current?.controller.signal].filter(Boolean);
     let response;
     try {
       response = await fetch(url, {
@@ -284,29 +284,22 @@ globalThis.spmCloudArchive = (() => {
       && ['yandex.net', 'yandex.ru', 'yandex.com'].some(domain => url.hostname === domain || url.hostname.endsWith('.' + domain));
   }
 
-  async function download(item, signal) {
-    if (item.size > maxSize) throw new Error('Файл превышает 10 МБ.');
+  async function download(item, signal, progress) {
+    fileIO.checkSize(item.size);
     let link;
     try { link = await (await request(resources + '/download?' + new URLSearchParams({ path: item.path }), signal, {}, true)).json(); }
     catch (error) { throw new Error('Получение ссылки скачивания: ' + error.message); }
     const url = new URL(link.href);
     if (link.method !== 'GET' || link.templated || !trustedDownload(url)) throw new Error('Недопустимая ссылка скачивания Яндекса.');
     let response;
-    try { response = await request(url.href, signal, { redirect: 'follow' }); }
+    try { response = await request(url.href, signal, { redirect: 'follow' }, false, 5 * 60 * 1000); }
     catch (error) { throw new Error('Чтение файла по ссылке Яндекса: ' + error.message); }
     if (response.url && !trustedDownload(new URL(response.url))) throw new Error('Конечный адрес скачивания вне доменов Яндекса.');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-    let size = 0, raw = '';
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) return raw + decoder.decode();
-        size += value.length;
-        if (size > maxSize) throw new Error('Файл превышает 10 МБ.');
-        raw += decoder.decode(value, { stream: true });
-      }
-    } finally { await reader.cancel().catch(() => {}); }
+    if (response.status === 206) throw new Error('Сервер вернул часть файла (HTTP 206).');
+    const headerSize = response.headers.get('content-length');
+    const size = Number.isSafeInteger(item.size) && item.size >= 0 ? item.size
+      : headerSize && !response.headers.get('content-encoding') ? Number(headerSize) : undefined;
+    return fileIO.read(response.body, { size, signal, progress });
   }
 
   const supports = department => clean(department) === 'Сборка';
@@ -323,45 +316,66 @@ globalThis.spmCloudArchive = (() => {
     signal?.throwIfAborted();
     if (phase !== 'connected' && connected()) notify('connected');
     const groups = new Map();
-    const problems = [], conflicts = [], candidates = [];
+    const problems = [], checks = [], conflicts = [], candidates = [];
     let duplicates = listing.duplicates, unread = 0, damaged = 0, outside = 0;
     for (const [index, item] of listing.files.entries()) {
       signal?.throwIfAborted();
-      progress('Проверка JSON: ' + (index + 1) + ' из ' + listing.files.length);
+      const label = (index + 1) + ' из ' + listing.files.length + ' · ' + item.name;
+      const check = { name: item.name, size: item.size };
       let raw;
-      try { raw = await download(item, signal); }
-      catch (error) {
+      progress('Скачивание JSON ' + label + ' · ' + fileIO.showSize(item.size));
+      try {
+        ({ raw, size: check.size } = await download(item, signal, bytes => {
+          progress('Скачивание JSON ' + label + ' · получено ' + fileIO.showSize(bytes));
+        }));
+      } catch (error) {
         signal?.throwIfAborted();
         if (!connected()) throw error;
         unread++;
-        problems.push(item.name + ' · не прочитан: ' + error.message);
+        const size = error.partial && Number.isSafeInteger(item.size) ? item.size : error.size ?? item.size;
+        problems.push(item.name + ' · ' + fileIO.showSize(size) + ' · не прочитан: ' + error.message);
         continue;
       }
+      progress('Проверка JSON ' + label + ' · ' + fileIO.showSize(check.size));
       try {
-        const json = JSON.parse(raw.replace(/^\uFEFF/, ''));
-        const exported = date(json.exportedAt);
+        if (check.size >= 10 * 1024 * 1024) await fileIO.pause();
+        const json = parseMatrixJSON(raw);
+        const exported = date(json?.exportedAt);
         if (!Number.isFinite(exported)) throw new Error('Нет корректного exportedAt.');
-        if (monthOf(exported) !== month) { outside++; continue; }
-        const matrix = parseMatrix(raw, month, dept);
+        if (monthOf(exported) !== month) {
+          outside++;
+          checks.push({ ...check, status: 'Другой месяц' });
+          continue;
+        }
+        const matrix = parseMatrixDocument(json, month, dept);
         const modified = date(item.modified);
-        if (!groups.has(matrix.id)) groups.set(matrix.id, []);
-        groups.get(matrix.id).push({ ...matrix, name: item.name, raw, exported, modified });
+        const fingerprint = await fileIO.fingerprint(raw);
+        signal?.throwIfAborted();
+        if (!groups.has(matrix.id)) groups.set(matrix.id, { entries: new Map(), invalidDates: false });
+        const group = groups.get(matrix.id);
+        if (group.entries.has(fingerprint)) duplicates++;
+        group.invalidDates ||= !Number.isFinite(modified) || modified < exported;
+        group.entries.set(fingerprint, { ...check, exported });
+        if (!group.latest || exported >= group.latest.exported) {
+          group.latest = { ...matrix, ...check, raw, exported, modified };
+        }
+        checks.push({ ...check, status: 'JSON проверен' });
       } catch (error) {
+        signal?.throwIfAborted();
         damaged++;
-        problems.push(item.name + ' · отклонён: ' + error.message);
+        problems.push(item.name + ' · ' + fileIO.showSize(check.size) + ' · отклонён: '
+          + (error instanceof RangeError ? 'Недостаточно памяти для обработки JSON.' : error.message));
       }
     }
-    for (const entries of groups.values()) {
-      const distinct = [...new Map(entries.map(entry => [entry.raw, entry])).values()];
-      duplicates += entries.length - distinct.length;
-      const invalidDates = entries.some(entry => !Number.isFinite(entry.modified) || entry.modified < entry.exported);
+    for (const { entries, invalidDates, latest } of groups.values()) {
+      const distinct = [...entries.values()];
       if (invalidDates || new Set(distinct.map(entry => entry.exported)).size !== distinct.length) {
-        conflicts.push(entries[0].section + ' · смена ' + entries[0].shift + ' · ' + (invalidDates
+        conflicts.push(latest.section + ' · смена ' + latest.shift + ' · ' + (invalidDates
           ? 'метаданные Диска не подтверждают время экспорта' : 'разные JSON с одним временем экспорта')
-          + ' · ' + distinct.map(entry => entry.name).join(', '));
+          + ' · ' + distinct.map(entry => entry.name + ' (' + fileIO.showSize(entry.size) + ')').join(', '));
         continue;
       }
-      candidates.push(distinct.sort((a, b) => b.exported - a.exported)[0]);
+      candidates.push(latest);
     }
     signal?.throwIfAborted();
     const expected = roster.filter(record => identityKey([record.department]) === identityKey([dept]));
@@ -371,7 +385,7 @@ globalThis.spmCloudArchive = (() => {
     const knownSections = new Set(expected.map(sectionKey));
     const matched = expected.filter(record => found.has(recordKey(month, record)));
     return {
-      candidates, problems, conflicts, duplicates, damaged, unread, outside, files: listing.files.length,
+      candidates, problems, checks, conflicts, duplicates, damaged, unread, outside, files: listing.files.length,
       listingRepeated: listing.listingRepeated,
       unknown: expected.length ? candidates.filter(record => !knownSections.has(sectionKey(record))) : [],
       extra: expected.length ? candidates.filter(record => !expectedIds.has(record.id)) : [],

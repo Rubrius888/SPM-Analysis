@@ -8,7 +8,8 @@ globalThis.spmRating = (() => {
     ['coveragePercent', 'Покрытие форматорами (U)'],
     ['opPercent2', 'Операторы 2L'], ['opPercent3', 'Операторы 3L'],
     ['postPercent2', 'Посты 2L'], ['postPercent3', 'Посты 3L'],
-    ['total2', 'Итог ILU 2L'], ['total3', 'Итог ILU 3L']
+    ['total2', 'Итог ILU 2L'], ['total3', 'Итог ILU 3L'],
+    ['rotationCoverage', 'Охват ротацией'], ['rotationExecution', 'Выполнение плана']
   ];
   const isLabel = value => ['string', 'number'].includes(typeof value) && String(value).trim();
 
@@ -167,6 +168,12 @@ globalThis.spmRating = (() => {
         ? missing.length || extra.length ? 'Неполная выборка' : 'Полная выборка'
         : 'Полнота не подтверждена';
       const totals = mergedMetrics(matrices, wholeDepartment);
+      const rotation = spmRotation.summarize(matrices.map(record => ({
+        ...record, rotation: spmRotation.fromMatrix(record.raw, month)
+      })), expected, month);
+      for (const key of ['rotationCoverage', 'rotationExecution']) {
+        if (rotation[key] !== null) totals.metrics[key] = Number(rotation[key].toFixed(1));
+      }
       return {
         id, department, workshop, section: wholeDepartment ? department : section,
         matrices, expected, missing, extra, completeness, ...totals,

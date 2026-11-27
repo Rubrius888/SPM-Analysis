@@ -55,11 +55,15 @@ function aggregate(records) {
   return totals;
 }
 
-function parseMatrix(raw, month, department) {
-  if (!validMonth(month)) throw new Error('Укажите месяц в формате ГГГГ-ММ.');
+function parseMatrixJSON(raw) {
   let parsed;
   try { parsed = JSON.parse(raw.replace(/^\uFEFF/, '')); }
   catch { throw new Error('Файл содержит некорректный JSON.'); }
+  return parsed;
+}
+
+function parseMatrixDocument(parsed, month, department) {
+  if (!validMonth(month)) throw new Error('Укажите месяц в формате ГГГГ-ММ.');
   const state = parsed?.state ?? parsed;
   if (!state || typeof state !== 'object') throw new Error('Матрица отсутствует.');
   const identity = Object.fromEntries(fields.map(field => [field, clean(state.filters?.[field])]));
@@ -72,6 +76,11 @@ function parseMatrix(raw, month, department) {
   return { id: recordKey(month, identity), month, ...identity, counts: calculate(state) };
 }
 
-if (typeof module !== 'undefined') module.exports = { aggregate, calculate, parseMatrix, fields, clean, validMonth, identityKey, recordKey };
-else globalThis.spmMetrics = { calculate, isEligibleRole, aggregate, parseMatrix, fields, clean, validMonth, identityKey, recordKey };
+function parseMatrix(raw, month, department) {
+  if (!validMonth(month)) throw new Error('Укажите месяц в формате ГГГГ-ММ.');
+  return parseMatrixDocument(parseMatrixJSON(raw), month, department);
+}
+
+if (typeof module !== 'undefined') module.exports = { aggregate, calculate, parseMatrix, parseMatrixJSON, parseMatrixDocument, fields, clean, validMonth, identityKey, recordKey };
+else globalThis.spmMetrics = { calculate, isEligibleRole, aggregate, parseMatrix, parseMatrixJSON, parseMatrixDocument, fields, clean, validMonth, identityKey, recordKey };
 })();

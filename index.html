@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>СПМ Анализ</title><link rel="stylesheet" href="style.css"><script src="metrics.js" defer></script><script src="trainers.js" defer></script><script src="rating.js" defer></script><script src="storage.js" defer></script><script src="department-picker.js" defer></script><script src="ui.js" defer></script><script src="rating-ui.js" defer></script><script src="cloud-archive.js" defer></script><script src="cloud-archive-ui.js" defer></script>
+<title>СПМ Анализ</title><link rel="stylesheet" href="style.css"><script src="metrics.js" defer></script><script src="matrix-files.js" defer></script><script src="trainers.js" defer></script><script src="rating.js" defer></script><script src="rotation.js" defer></script><script src="matrix-work.js" defer></script><script src="spm-score.js" defer></script><script src="storage.js" defer></script><script src="department-picker.js" defer></script><script src="ui.js" defer></script><script src="rotation-ui.js" defer></script><script src="matrix-work-ui.js" defer></script><script src="rating-ui.js" defer></script><script src="spm-score-ui.js" defer></script><script src="cloud-archive.js" defer></script><script src="cloud-archive-ui.js" defer></script>
 </head>
 <body>
 <header class="app-header">
@@ -17,11 +17,12 @@
 <nav class="section-nav wrap" aria-label="Разделы">
 <button id="deptTab" aria-pressed="true">Департамент</button>
 <button id="plantTab" aria-pressed="false">Завод</button>
+<button id="spmScoreTab" type="button" aria-pressed="false" aria-controls="spmScoreView spmScoreToolbar">ILU рейтинг</button>
 </nav>
 </div>
 </header>
-<main class="wrap">
-<section class="filters" aria-label="Панель управления">
+<main id="workspace" class="wrap">
+<section id="workspaceToolbar" class="filters" aria-label="Панель управления">
 <div id="deptField">
 <label id="departmentLabel" for="department">Департамент</label>
 <div class="department-control">
@@ -40,6 +41,21 @@
 <span id="cloudConnection" class="muted" role="status"></span>
 <input type="file" id="batch" accept=".json,application/json" multiple hidden>
 <input type="file" id="replacement" accept=".json,application/json" hidden>
+<div id="spmScoreToolbar" class="score-toolbar" hidden>
+<div class="score-titlebar">
+<h2 id="spmScoreHeading">ILU рейтинг</h2>
+<button id="spmScoreHelpOpen" class="score-help-trigger" type="button" aria-haspopup="dialog" aria-controls="spmScoreHelp"><span class="score-help-icon" aria-hidden="true">i</span>Как рассчитывается</button>
+</div>
+<p id="spmScoreScale" class="muted">Все участки завода · шкала 0–100 баллов</p>
+
+<div class="actions score-controls">
+<label>Отчётный месяц <input id="spmScoreMonth" type="month"></label>
+<label id="spmScoreRevisionField" hidden>Версия снимка <select id="spmScoreRevision"></select></label>
+<button id="spmScoreSave" class="primary" type="button">Сохранить снимок</button>
+<button id="spmScoreRecalculate" type="button" hidden>Пересчитать период</button>
+</div>
+<p id="spmScoreStatus" class="muted" role="status"></p>
+</div>
 <details class="backup">
 <summary aria-label="Хранение и резервные копии">Хранение и копии</summary>
 <div class="backup-content">
@@ -54,6 +70,7 @@
 </details>
 </section>
 <div id="message" role="status"></div>
+<div id="analyticsView">
 <section id="departmentTotals" class="department-totals" aria-label="Общие показатели">
 <div class="totals-grid" role="status">
 <div class="total-card">
@@ -72,6 +89,8 @@
 <button id="postTab" type="button" role="tab" aria-controls="postPanel" aria-selected="false" tabindex="-1">Посты</button>
 <button id="meanTab" type="button" role="tab" aria-controls="meanPanel" aria-selected="false" tabindex="-1">Среднее</button>
 <button id="trainerTab" type="button" role="tab" aria-controls="trainerPanel" aria-selected="false" tabindex="-1">Форматоры</button>
+<button id="rotationTab" type="button" role="tab" aria-controls="rotationPanel" aria-selected="false" tabindex="-1">Ротация</button>
+<button id="matrixWorkTab" type="button" role="tab" aria-controls="matrixWorkPanel" aria-selected="false" tabindex="-1">Работа с матрицей</button>
 <button id="ratingTab" type="button" role="tab" aria-controls="ratingPanel" aria-selected="false" tabindex="-1" hidden>Рейтинг участков</button>
 </div>
 <section id="operatorPanel" class="analysis-panel" role="tabpanel" aria-labelledby="operatorTab" tabindex="0">
@@ -125,7 +144,39 @@
 </div>
 <details class="panel"><summary>Посты без U</summary><div id="trainerUncovered" class="scroll history-scroll"></div></details>
 </section>
+<section id="rotationPanel" class="analysis-panel" role="tabpanel" aria-labelledby="rotationTab" tabindex="0" hidden>
+<h2>Ротация персонала</h2>
+<div id="rotationCards" class="cards rotation-cards"></div>
+<p id="rotationNotice" class="coverage"></p>
+<section class="panel">
+<h3>Динамика по месяцам</h3>
+<label>Показатель <select id="rotationChartMetric"><option value="rotationCoverage">Охват ротацией</option><option value="rotationExecution">Выполнение плана</option><option value="rotationApproval">Утверждение планов</option></select></label>
+<div id="rotationChart" class="scroll chart-scroll"></div>
+<div id="rotationHistory" class="scroll history-scroll"></div>
+</section>
+<section class="panel">
+<h3>Статистика ротации</h3>
+<div id="rotationFilters" class="actions"></div>
+<div id="rotationRows" class="scroll"></div>
+</section>
+</section>
+<section id="matrixWorkPanel" class="analysis-panel" role="tabpanel" aria-labelledby="matrixWorkTab" tabindex="0" hidden>
+<h2>Работа с матрицей</h2>
+<div id="matrixWorkCards" class="cards matrix-work-cards"></div>
+<p id="matrixWorkNotice" class="muted"></p>
+<section id="matrixWorkPlantPanel" class="panel" hidden><h3>Сравнение департаментов</h3><div id="matrixWorkPlant" class="scroll"></div></section>
+<section class="panel">
+<h3>Контроль участков</h3>
+<div id="matrixWorkRows" class="scroll"></div>
+</section>
+<dialog id="matrixWorkDialog" aria-labelledby="matrixWorkTitle">
+<form method="dialog"><button class="rating-close">Закрыть</button></form>
+<h2 id="matrixWorkTitle"></h2><label>Смена <select id="matrixWorkShift"></select></label>
+<div id="matrixWorkDetails"></div>
+</dialog>
+</section>
 <section id="ratingPanel" class="analysis-panel" role="tabpanel" aria-labelledby="ratingTab" tabindex="0" hidden>
+
 <div id="ratingMetrics" class="rating-metrics" role="tablist" aria-label="Показатели рейтинга"></div>
 <div class="rating-heading"><h2 id="ratingTitle">Рейтинг участков</h2></div>
 <p id="ratingStatus" class="coverage" role="status"></p>
@@ -143,6 +194,55 @@
 <label>Перечень матриц<textarea id="roster" rows="7" placeholder="Сборка; Цех сборки салона; Участок сборки салона 4; A"></textarea></label>
 <div class="actions"><button id="appendLoaded">Добавить загруженные</button><button id="copyRoster">Взять последний заданный перечень</button><button id="saveRoster" class="primary">Сохранить перечень</button></div>
 <div id="missing"></div></details>
+</div>
+<section id="spmScoreView" aria-labelledby="spmScoreHeading" hidden>
+<div class="score-slide-title">
+<h2 id="spmScoreSlideHeading">ILU рейтинг</h2>
+<p id="spmScorePrintPeriod"></p>
+</div>
+<section id="spmScoreLeaders" class="panel score-leaders" aria-labelledby="spmScoreLeadersHeading" hidden>
+<h3 id="spmScoreLeadersHeading" class="score-leaders-heading">Лидеры завода</h3>
+<div id="spmScorePodium" class="score-podium"></div>
+</section>
+<section id="spmScoreStandings" class="panel score-runners" aria-labelledby="spmScoreTableHeading" hidden>
+<h3 id="spmScoreTableHeading" class="score-table-heading" hidden>Остальные участки</h3>
+<div id="spmScoreTable" class="scroll" role="region" aria-labelledby="spmScoreTableHeading" tabindex="0"></div>
+</section>
+<dialog id="spmScoreHelp" aria-labelledby="spmScoreHelpTitle">
+<header class="score-help-header">
+<h2 id="spmScoreHelpTitle">Как рассчитывается ILU рейтинг</h2>
+<form method="dialog"><button type="submit" class="score-help-close" aria-label="Закрыть методику" autofocus>×</button></form>
+</header>
+<div class="score-help-body">
+<section class="score-help-formula" aria-labelledby="spmScoreFormulaTitle">
+<h3 id="spmScoreFormulaTitle">Начисление баллов</h3>
+<p><strong>Баллы показателя = фактический процент × вес / 100.</strong> Например, 80% по показателю весом 10,6 дают 8,48 балла.</p>
+<p><strong>Итог = сумма баллов по всем показателям.</strong> Веса уже дают максимум 100. Начисления суммируются без промежуточного округления. Итог отображается с двумя знаками после запятой.</p>
+</section>
+<div id="spmScoreHelpWeights" class="score-help-weights"></div>
+<dl class="score-help-rules">
+<div><dt>Отсутствие данных</dt><dd>Если процент действующего показателя нельзя рассчитать, за него начисляется 0 баллов. Вес сохраняется. Такой участок помечается как предварительный. Если есть хотя бы один такой участок, предварительным считается и рейтинг месяца. Подтверждённые 0% сами по себе не дают этого статуса.</dd></div>
+<div><dt>Место участка</dt><dd>Места сохраняются по прежнему порядку методики 1.2. Участки с равным результатом по прежним весам делят одно место, например 1, 1, 3. После перераспределения у близких результатов порядок мест может отличаться от порядка новых баллов.</dd></div>
+<div><dt>Динамика за месяц</dt><dd>Изменение баллов — текущий итог минус предыдущий, изменение позиции — предыдущее место минус текущее. Плюс по позиции означает подъём. Для сравнения нужен последний сохранённый снимок непосредственно предыдущего календарного месяца с той же версией методики. При отсутствии снимка или участка в нём, а также при разных версиях показывается прочерк.</dd></div>
+</dl>
+<footer class="score-help-maximum"><span>Максимальный результат</span><strong id="spmScoreHelpMaximum"></strong></footer>
+</div>
+</dialog>
+<dialog id="spmScoreDetail" aria-labelledby="spmScoreDetailTitle">
+<form method="dialog"><button type="submit" class="rating-close">Закрыть</button></form>
+<h2 id="spmScoreDetailTitle"></h2><div id="spmScoreDetailContent"></div>
+</dialog>
+<dialog id="spmScoreReason" aria-labelledby="spmScoreReasonTitle">
+<form id="spmScoreReasonForm">
+<h2 id="spmScoreReasonTitle">Пересчёт месячного рейтинга</h2>
+<p>Пересчёт использует текущие матрицы и перечень смен выбранного месяца. Предыдущая версия останется в истории.</p>
+<label for="spmScoreReasonText">Причина пересчёта</label>
+<textarea id="spmScoreReasonText" required maxlength="500" rows="3"></textarea>
+<p id="spmScoreReasonStatus" role="alert" class="muted"></p>
+<div class="actions"><button id="spmScoreCancel" type="button">Отмена</button><button id="spmScoreConfirm" class="primary" type="submit">Сохранить новую версию</button></div>
+</form>
+</dialog>
+</section>
 <dialog id="deleteMatrixDialog" aria-labelledby="deleteMatrixTitle" aria-describedby="deleteMatrixWarning">
 <h2 id="deleteMatrixTitle">Удалить матрицу</h2>
 <dl id="deleteMatrixDetails" class="delete-matrix-details"></dl>
